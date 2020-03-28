@@ -1,446 +1,520 @@
-const telegramService = require('./telegramService');
-// const TelegramBot = require('node-telegram-bot-api');
-const mongo = require('mongodb');
+const TelegramBot = require('node-telegram-bot-api');
+const config = require('config');
 const express = require('express');
+const helmet = require('helmet');
+const _ = require('lodash');
+const Joi = require('joi');
 const bodyParser = require('body-parser');
-const cron = require('node-cron');
-const constants = require('./constants');
-// const bot = new TelegramBot(constants.TELEGRAM_BOT_TOKEN, {polling: true});
 const cors = require('cors');
+const schedule = require('node-schedule');
 
-
-const fs = require('fs');
-const util = require('util');
-const log_file = fs.createWriteStream('./debug.log', {flags: 'w'});
-const log_stdout = process.stdout;
-
-console.log = function (d) { //
-    log_file.write(util.format(d) + '\n');
-    log_stdout.write(util.format(d) + '\n');
-};
-
-
-let task = cron.schedule("*/30 * * * *", () => {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (!error) {
-            let query = {task: 'auto-posting-accounts'};
-            db.collection("tasks").find(query).toArray((err, collection) => {
-                if (err) throw err;
-                if (collection.length === 1 && collection[0].active) {
-                    let hour = new Date().getHours();
-                    let silent = !(hour > 9 && hour < 22);
-                    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-                        if (!error) {
-                            db.collection("accounts").find({active: true}).sort({
-                                lastPublishDataTime: 1,
-                                identifier: 1
-                            }).limit(7).toArray((err, collection) => {
-                                if (err) {
-                                    throw err;
-                                } else {
-                                    collection.forEach(function (item) {
-                                        console.log(item.telegramIdentifiers);
-                                        if (item.telegramIdentifiers !== null && item.telegramIdentifiers !== undefined && item.telegramIdentifiers.length !== 0) {
-                                            let deletePromise = telegramService.deleteMessages(item);
-                                            deletePromise.then(function (result) {
-                                                telegramService.sendMessage(item, silent);
-                                            }, function (err) {
-                                                console.log(err);
-                                            })
-                                        } else {
-                                            telegramService.sendMessage(item, silent);
-                                        }
-                                    });
-                                }
-                            });
-                        }
-                    });
-                }
-                db.close();
-            });
-
-        }
-    });
-});
-
-task.start();
+const {User} = require('./model/user');
+const {Post} = require('./model/post');
+const {ScheduledTask} = require('./model/scheduled-task');
+const {PublishPostHistory} = require('./model/publish-post-history');
+const {AutoPostBasicInfo} = require('./model/auto-post-basic-info');
+const {authenticate} = require('./middleware/authenticate');
+const {handleResponse, getCurrentDateTime, convertPersianDateToGregorian} = require('./utils/utils');
+const {getCategoryElement} = require('./utils/categories');
+const {logger} = require('./utils/winstonOptions');
 
 const app = express();
 app.use(bodyParser.urlencoded({extended: true}));
 app.use(bodyParser.json());
 app.use(bodyParser.raw());
+app.use(helmet());
 app.use(cors());
 
-app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-    const auth = {login: 'sina', password: 'shamsi'};
-    const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
-    const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
-    if (login && password && login === auth.login && password === auth.password) {
-        return next();
+const persianDate = require('persian-date');
+persianDate.toLocale('en');
+
+process.env.NTBA_FIX_319 = 1;
+
+const bot = new TelegramBot(config.get('TELEGRAM_BOT_TOKEN'), {polling: true});
+let scheduledTasks = [];
+let autoPostTaskMap = new Map();
+
+let addScheduledTaskToAutoPostTaskMap = (user, scheduledTask) => {
+    let oldTask = autoPostTaskMap.get(user.username);
+    if (oldTask) {
+        oldTask.cancel();
     }
-    res.set('WWW-Authenticate', 'Basic realm="401"');
-    res.status(401).send('Authentication required.')
-});
+    autoPostTaskMap.set(user.username, scheduledTask);
+};
 
-app.post('/delete-account', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است.", "result": error});
+let scheduledRegisteredTask = (task) => {
+    let startTime = new Date(convertPersianDateToGregorian(task.executeDateTime));
+    let scheduledTask = schedule.scheduleJob(startTime, function () {
+        executeScheduledTask(task).then(() => {
+            logger.info(`Scheduled TASK HAS BEAN RUN ON ${task.executeDateTime}`);
+        }).catch(e => {
+            logger.error(`ERROR ON EXECUTE SCHEDULED TASK : ${e}`);
+        });
+    });
+    scheduledTasks.push(scheduledTask);
+};
+
+let scheduledAutoPostBasicInfo = (basicInfo) => {
+    let startTime = ` */${basicInfo.interval} * * * *`;
+    let scheduledTask = schedule.scheduleJob(startTime, function () {
+        executeAutoPost(basicInfo).then(() => {
+            logger.info(`AUTO POST TASK HAS BEAN RUN ON ${getCurrentDateTime()}`);
+        }).catch(e => {
+            logger.error(`ERROR ON EXECUTE AUTO POST TASK : ${e}`);
+        });
+    });
+    addScheduledTaskToAutoPostTaskMap(basicInfo.user, scheduledTask);
+};
+
+let initAutoPostBasicInfo = async () => {
+    try {
+        let basicInfos = await AutoPostBasicInfo.loadBasicInfo();
+        if (basicInfos.length != 0) {
+            basicInfos.forEach((basicInfo) => {
+                scheduledAutoPostBasicInfo(basicInfo);
+            });
         }
-        db.collection("accounts").deleteMany(req.body, (er, collection) => {
-            if (er) {
-                res.status(401).send({
-                    "success": false,
-                    "message": er
-                });
-            } else {
-                res.send({
-                    "success": true,
-                    "message": "عملیات با موفقیت انجام شد."
-                });
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
+
+
+let initScheduledTask = async () => {
+    try {
+        let tasks = await ScheduledTask.loadAllRegisteredScheduledTask();
+        if (tasks.length != 0) {
+            tasks.forEach((task) => {
+                scheduledRegisteredTask(task);
+            });
+        }
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
+
+let executeScheduledTask = async (task) => {
+    try {
+        await ScheduledTask.updateScheduledTaskStatus(task._id, 'RUNNING_SCHEDULED_TASK_STATUS');
+        if (task.identifiers.length != 0) {
+            task.identifiers.forEach(async (identifier) => {
+                await sendPost(task.user, identifier, task.silent);
+                await ScheduledTask.updateScheduledTaskStatus(task._id, 'RAN_SCHEDULED_TASK_STATUS');
+            })
+        }
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
+
+let executeAutoPost = async (basicInfo) => {
+    try {
+        if (basicInfo.active) {
+            let favouritePosts = await Post.searchForAutoPost(true, basicInfo.numberOfFavouritePost);
+            let normalPosts = await Post.searchForAutoPost(false, basicInfo.numberOfNormalPost);
+            const posts = [...favouritePosts, ...normalPosts];
+            if (posts.length != 0) {
+                posts.forEach(async (post) => {
+                    await sendPost(post.user, post.identifier, basicInfo.silent);
+                })
             }
-            db.close();
-        });
-    });
-});
+        }
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
 
-
-app.post('/add-account', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        let query = {username: req.body.username, password: req.body.password, active: true};
-        db.collection("accounts").find(query).toArray((err, collection) => {
-            if (error) {
-                res.status(401).send({"success": false, "message": error});
-            } else {
-                if (collection.length !== 0) {
-                    res.status(401).send({"success": false, "message": "این اکانت قبلا ثبت شده است."});
-                } else {
-                    let identifier = 100;
-                    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-                        if (error) {
-                            res.status(401).send({"success": false, "message": error});
-                        } else {
-                            db.collection("accounts").find({}).sort({identifier: -1}).limit(1).toArray((err, collection) => {
-                                if (err) {
-                                    res.status(401).send({"success": false, "message": err});
-                                } else {
-                                    console.log(collection);
-                                    if (collection.length === 1) {
-                                        identifier = collection[0].identifier + 1;
-                                    }
-                                    req.body.identifier = identifier;
-                                    req.body.active = true;
-                                    req.body.telegramIdentifiers = [];
-                                    req.body.lastPublishDataTime = null;
-
-                                    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-                                        if (error) {
-                                            res.status(401).send({"success": false, "message": error});
-                                        } else {
-                                            db.collection("accounts").insertOne(req.body, (er, collection) => {
-                                                if (er) {
-                                                    res.status(401).send({
-                                                        "success": false,
-                                                        "message": er
-                                                    });
-                                                } else {
-                                                    res.send({
-                                                        "success": true,
-                                                        "message": "عملیات با موفقیت انجام شد."
-                                                    });
-                                                }
-                                            });
-                                        }
-                                    });
-                                }
-                            });
-                        }
-                    });
+let sendPost = async (user, identifier, silent) => {
+    try {
+        let post = await Post.findPost(user, identifier);
+        if (post.status.name !== 'DELETED_POST_STATUS') {
+            await bot.sendMessage(user.channelChatIdentifier, '#EG' + post.identifier + '\n' + post.content, {
+                disable_notification: silent,
+                parse_mode: 'html'
+            }).then(async (result) => {
+                if (result.message_id) {
+                    let status = getCategoryElement('SENT_POST_STATUS');
+                    await Post.updatePostStatus(post._id, status);
+                    await post.addPublishPostHistory(result.message_id);
+                    return Promise.resolve(result);
                 }
-            }
-        });
-        db.close();
-    });
-});
-
-
-app.post('/deActive-account', function (req, res) {
-    let hasError = false;
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": error});
+            }).catch((e) => {
+                return Promise.reject(e);
+            });
         } else {
-            db.collection("accounts").find(req.body).toArray((err, collection) => {
-                if (err) {
-                    res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
+            return Promise.reject("INVALID POST STATUS");
+        }
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
+
+app.post('/api/register-user', async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['name', 'username', 'password', 'channelChatIdentifier', 'adminChatIdentifier']);
+        let user = new User(body);
+        await user.save();
+        handleResponse(res, true, user);
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+app.post('/api/login', async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['username', 'password']);
+
+        let user = await User.findByCredentials(body.username, body.password);
+        let token = await user.generateAuthToken();
+        res.header('x-auth', token).status(200).send({success: true, data: token});
+    } catch (e) {
+        res.status(400).json({
+            Error: `Something went wrong. ${e}`
+        });
+    }
+});
+
+
+app.post('/api/save-or-update-auto-post-scheduled-task', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['interval', 'numberOfNormalPost', 'numberOfFavouritePost', 'active', 'silent']);
+        const joiSchema = {
+            interval: Joi.number().max(60).required(),
+            numberOfNormalPost: Joi.number().required(),
+            numberOfFavouritePost: Joi.number().required(),
+            active: Joi.boolean().required(),
+            silent: Joi.boolean().required()
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            if (body.executeDateTime <= getCurrentDateTime()) {
+                handleResponse(res, false, "INVALID EXECUTE DATE TIME");
+            } else {
+                let oldBasicInfo = await AutoPostBasicInfo.loadBasicInfoByUser(req.user);
+                body.lastUpdateDateTime = getCurrentDateTime();
+                if (oldBasicInfo) {
+                    await oldBasicInfo.updateBasicInfo(body);
+                    body.user = req.user;
+                    scheduledAutoPostBasicInfo(body);
                 } else {
-                    collection.forEach(function (item) {
-                        let deletePromise = telegramService.deleteMessages(item);
-                        deletePromise.then(function (result) {
-                            mongo.connect(constants.DATABASE_ADDRESS, (error, db) => {
-                                if (error) {
-                                    res.status(401).send({"success": false, "message": error});
-                                } else {
-                                    let query = {identifier: item.identifier};
-                                    item.active = false;
-                                    db.collection("accounts").updateOne(query, item, (err, collection) => {
-                                        if (err) {
-                                            res.status(401).send({"success": false, "message": err});
-                                            hasError = true;
-                                            return;
-                                        }
-                                    });
-                                }
-                            });
-                        }, function (err) {
-                            res.status(401).send({"success": false, "message": "خطایی رخ داده است.", error: err});
-                            hasError = true;
-                            return;
-                        });
-
-                    });
-                    if (!hasError) {
-                        res.send({"success": true, "message": "عملیات با موفقیت انجام شد."});
-                    }
+                    body.creationDateTime = getCurrentDateTime();
+                    body.user = req.user;
+                    let basicInfo = new AutoPostBasicInfo(body);
+                    await basicInfo.save();
+                    scheduledAutoPostBasicInfo(basicInfo);
                 }
-                db.close();
-            });
+                handleResponse(res, true, body);
+            }
         }
-    });
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
 });
 
 
-app.post('/fetch-accounts', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": error});
+app.post('/api/register-scheduled-task', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['executeDateTime', 'identifiers', 'silent']);
+        const joiSchema = {
+            executeDateTime: Joi.string().min(16).max(16).required(),
+            silent: Joi.boolean().required(),
+            identifiers: Joi.array().required().min(1).items(Joi.number().required())
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            if (body.executeDateTime <= getCurrentDateTime()) {
+                handleResponse(res, false, "INVALID EXECUTE DATE TIME");
+            } else {
+                body.creationDateTime = getCurrentDateTime();
+                body.lastUpdateDateTime = getCurrentDateTime();
+                body.user = req.user;
+                body.status = getCategoryElement('REGISTERED_SCHEDULED_TASK_STATUS');
+                let task = new ScheduledTask(body);
+                await task.save();
+                scheduledRegisteredTask(task);
+                handleResponse(res, true, body);
+            }
         }
-
-        let query = {};
-        if (req.body !== null && req.body !== undefined) {
-            if (req.body.identifier !== null && req.body.identifier !== undefined && req.body.identifier !== '') {
-                query.identifier = req.body.identifier;
-            }
-            if (req.body.content !== null && req.body.content !== undefined && req.body.content !== '') {
-                query.content = new RegExp(req.body.content, 'i');
-            }
-
-            if (req.body.active !== null && req.body.active !== undefined && req.body.active !== '') {
-                query.active = (req.body.active === "true");
-            }
-        }
-
-
-        db.collection("accounts").find(query).toArray((err, collection) => {
-            if (err) throw err;
-            db.close();
-            res.send({"success": true, data: collection, "message": "عملیات با موفقیت انجام شد."});
-        });
-    });
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
 });
 
-app.post('/post-accounts', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
+
+app.post('/api/search-scheduled-task', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['status', 'executeDateTime', 'pagination', 'shouldReturnCount']);
+        const joiSchema = {
+            executeDateTime: Joi.string().optional(),
+            status: Joi.object().optional().keys({
+                name: Joi.string().required()
+            }),
+            shouldReturnCount: Joi.boolean().optional(),
+            pagination: Joi.object().required().keys({
+                maxResult: Joi.number().required(),
+                pageNumber: Joi.number().required()
+            }),
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            let result = {};
+            const searchCriteria = _.pick(body, ['identifier', 'content', 'favourite']);
+            if (body.status) {
+                let status = {
+                    "status.name": body.status.name
+                };
+                Object.assign(searchCriteria, status);
+            }
+            if (searchCriteria.executeDateTime) {
+                searchCriteria.executeDateTime = new RegExp(searchCriteria.executeDateTime, 'i');
+            }
+
+            searchCriteria.user = req.user;
+            const paginationInfo = _.pick(body, ['pagination', 'shouldReturnCount']);
+            if (paginationInfo.shouldReturnCount === true) {
+                result.count = await ScheduledTask.searchScheduledTaskCount(searchCriteria);
+                result.numberOfPages = Math.ceil(parseInt(result.count) / parseInt(paginationInfo.pagination.maxResult));
+            }
+            result.searchResultArray = await ScheduledTask.searchScheduledTask(searchCriteria, paginationInfo.pagination);
+            result.dateTime = getCurrentDateTime();
+            handleResponse(res, true, result);
         }
-        db.collection("accounts").find({active: true}).toArray((err, collection) => {
-            if (err) throw err;
-            collection.forEach(function (item) {
-                let sendPromise = telegramService.sendMessage(item, false);
-                sendPromise.then(function (result) {
-                }, function (err) {
-                    res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
-                });
-            });
-            db.close();
-            res.send({"success": true, "message": "عملیات با موفقیت انجام شد."});
-        });
-    });
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
 });
 
-app.post('/post-account', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
+
+app.post('/api/register-post', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['title', 'content', 'attributes', 'favourite']);
+
+        const joiSchema = {
+            favourite: Joi.boolean().required(),
+            title: Joi.string().required(),
+            content: Joi.string().required(),
+            attributes: Joi.array().max(10).items(
+                Joi.object(
+                    {
+                        title: Joi.string().required(),
+                        value: Joi.string().required()
+                    }
+                )
+            )
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            body.active = true;
+            body.creationDateTime = getCurrentDateTime();
+            body.lastUpdateDateTime = getCurrentDateTime();
+            body.user = req.user;
+            body.identifier = await Post.findNextIdentifier(body.user);
+            body.status = getCategoryElement('REGISTERED_POST_STATUS');
+            let post = new Post(body);
+            await post.save();
+            handleResponse(res, true, body);
         }
-        db.collection("accounts").find(req.body).toArray((err, collection) => {
-            if (err) throw err;
-            collection.forEach(function (item) {
-                let sendPromise = telegramService.sendMessage(item, false);
-                sendPromise.then(function (result) {
-                    res.send({
-                        "success": true,
-                        "message": "عملیات با موفقیت انجام شد.",
-                        "result": result,
-                        "item": item
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+app.post('/api/update-post', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['identifier', 'title', 'content', 'attributes', 'favourite']);
+
+        const joiSchema = {
+            favourite: Joi.boolean().required(),
+            identifier: Joi.number().required(),
+            title: Joi.string().required(),
+            content: Joi.string().required(),
+            attributes: Joi.array().max(10).items(
+                Joi.object(
+                    {
+                        title: Joi.string().required(),
+                        value: Joi.string().required()
+                    }
+                )
+            )
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            let post = await Post.findPost(req.user, body.identifier);
+            let oldContent = post.content;
+            body.lastUpdateDateTime = getCurrentDateTime();
+            await post.updatePost(body);
+            if (oldContent !== body.content && post.publishHistory.length !== 0) {
+                post.publishHistory.forEach(async (item) => {
+                    let publishPostHistory = await PublishPostHistory.loadById(item);
+                    if (publishPostHistory.active) {
+                        bot.editMessageText(body.content, {
+                            chat_id: req.user.channelChatIdentifier,
+                            message_id: publishPostHistory.identifier,
+                            disable_notification: true,
+                            parse_mode: 'html'
+                        }).then(async () => {
+                            await PublishPostHistory.updateLastUpdateDateTime(publishPostHistory._id);
+                        });
+                    }
+                })
+            }
+            handleResponse(res, true, body);
+        }
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+app.post('/api/search-post', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['identifier', 'content', 'favourite', 'status', 'pagination', 'shouldReturnCount']);
+        const joiSchema = {
+            identifier: Joi.number().optional(),
+            content: Joi.string().optional(),
+            favourite: Joi.boolean().optional(),
+            shouldReturnCount: Joi.boolean().optional(),
+            pagination: Joi.object().required().keys({
+                maxResult: Joi.number().required(),
+                pageNumber: Joi.number().required()
+            }),
+            status: Joi.object().optional().keys({
+                name: Joi.string().required()
+            })
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            let result = {};
+            const searchCriteria = _.pick(body, ['identifier', 'content', 'favourite']);
+            if (body.status) {
+                let status = {
+                    "status.name": body.status.name
+                };
+                Object.assign(searchCriteria, status);
+            }
+            searchCriteria.user = req.user;
+            const paginationInfo = _.pick(body, ['pagination', 'shouldReturnCount']);
+
+            if (searchCriteria.content) {
+                searchCriteria.content = new RegExp(searchCriteria.content, 'i');
+            }
+            if (paginationInfo.shouldReturnCount === true) {
+                result.count = await Post.searchPostCount(searchCriteria);
+                result.numberOfPages = Math.ceil(parseInt(result.count) / parseInt(paginationInfo.pagination.maxResult));
+            }
+            result.searchResultArray = await Post.searchPost(searchCriteria, paginationInfo.pagination);
+            result.dateTime = getCurrentDateTime();
+            handleResponse(res, true, result);
+        }
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+app.post('/api/send-post', authenticate, async (req, res) => {
+    const body = _.pick(req.body, ['identifier', 'silent']);
+    const joiSchema = {
+        identifier: Joi.number().required(),
+        silent: Joi.boolean().required()
+    };
+    let validateResult = Joi.validate(body, joiSchema);
+
+    if (validateResult.error) {
+        handleResponse(res, false, validateResult.error);
+    } else {
+        try {
+            await sendPost(req.user, body.identifier, body.silent);
+            handleResponse(res, true, body);
+        } catch (e) {
+            handleResponse(res, false, e);
+        }
+    }
+});
+
+app.post('/api/delete-post', authenticate, async (req, res) => {
+    const body = _.pick(req.body, ['identifier']);
+    const joiSchema = {
+        identifier: Joi.number().required()
+    };
+    let validateResult = Joi.validate(body, joiSchema);
+
+    if (validateResult.error) {
+        handleResponse(res, false, validateResult.error);
+    } else {
+        try {
+            let post = await Post.findPost(req.user, body.identifier);
+            if (post.publishHistory.length !== 0) {
+                post.publishHistory.forEach(async (item) => {
+                    let publishPostHistory = await PublishPostHistory.loadById(item);
+                    if (publishPostHistory.active) {
+                        bot.deleteMessage(req.user.channelChatIdentifier, publishPostHistory.identifier).then(async () => {
+                            await PublishPostHistory.makeDeActivePublishPostHistory(publishPostHistory._id);
+                        });
+                    }
+                })
+            }
+            let status = getCategoryElement('DELETED_POST_STATUS');
+            await Post.updatePostStatus(post._id, status);
+            handleResponse(res, true, body);
+        } catch (e) {
+            handleResponse(res, false, e);
+        }
+    }
+});
+
+app.post('/api/delete-all-post', authenticate, async (req, res) => {
+    try {
+        let publishHistoryArray = await PublishPostHistory.findActivePost();
+        if (publishHistoryArray.length !== 0) {
+            publishHistoryArray.forEach(async (publishPostHistory) => {
+                let post = publishPostHistory.post;
+                let status = getCategoryElement('DELETED_POST_STATUS');
+                await Post.updatePostStatus(post._id, status);
+                if (publishPostHistory.active) {
+                    bot.deleteMessage(req.user.channelChatIdentifier, publishPostHistory.identifier).then(async () => {
+                        await PublishPostHistory.makeDeActivePublishPostHistory(publishPostHistory._id);
+                    }).catch((e) => {
+                        handleResponse(res, false, e);
                     });
-                }, function (err) {
-                    res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
-                });
-            });
-            db.close();
-        });
-    });
-});
-
-app.post('/remove-accounts', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
+                }
+            })
         }
-        db.collection("accounts").find({active: true}).toArray((err, collection) => {
-            if (err) throw err;
-            collection.forEach(function (item) {
-                let deletePromise = telegramService.deleteMessages(item);
-                deletePromise.then(function (result) {
-                }, function (err) {
-                    res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
-                });
-            });
-            db.close();
-            res.send({"success": true, "message": "عملیات با موفقیت انجام شد."});
-        });
+        handleResponse(res, true, "OPERATION HAS BEAN DONE");
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+
+app.listen(config.get('PORT'), async () => {
+    initAutoPostBasicInfo().then(() => {
+        logger.info(`INIT AUTO POST BASIC INFO DONE`);
+    }).catch((e) => {
+        logger.error(`ERROR ON INIT AUTO POST BASIC INFO  : ${e}`);
     });
-});
 
-app.post('/remove-account', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
-        }
-        db.collection("accounts").find(req.body).toArray((err, collection) => {
-            if (err) throw err;
-            collection.forEach(function (item) {
-                let deletePromise = telegramService.deleteMessages(item);
-                deletePromise.then(function (result) {
-                }, function (err) {
-                    res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
-                });
-            });
-            db.close();
-            res.send({"success": true, "message": "عملیات با موفقیت انجام شد."});
-        });
+    initScheduledTask().then(() => {
+        logger.info(`INIT SCHEDULED TASK DONE`);
+    }).catch((e) => {
+        logger.error(`ERROR ON INIT SCHEDULED TASK : ${e}`);
     });
-});
-
-app.post('/update-account', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
-        }
-        let query = {identifier: req.body.identifier};
-        db.collection("accounts").find(query).toArray((err, collection) => {
-            if (err) throw err;
-            collection.forEach(function (item) {
-                mongo.connect(constants.DATABASE_ADDRESS, (error, db) => {
-                    if (error) {
-                        res.status(401).send({"success": false, "message": error});
-                    } else {
-                        item.username = req.body.username;
-                        item.password = req.body.password;
-                        item.content = req.body.content;
-                        db.collection("accounts").updateOne(query, item, (err, collection) => {
-                            if (err) {
-                                res.status(401).send({"success": false, "message": error});
-                            }
-                        });
-                    }
-                });
-            });
-            db.close();
-            res.send({"success": true, "message": "عملیات با موفقیت انجام شد."});
-        });
-    });
-});
-
-
-app.post('/update-schedule-task', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
-        }
-        // 'auto-posting-accounts'
-        let query = {task: req.body.task};
-        db.collection("tasks").find(query).toArray((err, collection) => {
-            if (err) throw err;
-            collection.forEach(function (item) {
-                mongo.connect(constants.DATABASE_ADDRESS, (error, db) => {
-                    if (error) {
-                        res.status(401).send({"success": false, "message": error});
-                    } else {
-                        item.active = req.body.active;
-                        db.collection("tasks").updateOne(query, item, (err, collection) => {
-                            if (err) {
-                                res.status(401).send({"success": false, "message": error});
-                            }
-                        });
-                    }
-                });
-            });
-            db.close();
-            res.send({"success": true, "message": "عملیات با موفقیت انجام شد."});
-        });
-    });
-});
-
-
-app.post('/add-schedule-task', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است."});
-        }
-        db.collection("tasks").insertOne(req.body, (er, collection) => {
-            if (er) {
-                res.status(401).send({
-                    "success": false,
-                    "message": er
-                });
-            } else {
-                res.send({
-                    "success": true,
-                    "message": "عملیات با موفقیت انجام شد."
-                });
-            }
-        });
-        db.close();
-        res.send({"success": true, "message": "عملیات با موفقیت انجام شد."});
-    });
-});
-
-
-app.post('/fetch-schedule-task', function (req, res) {
-    mongo.connect(constants.DATABASE_ADDRESS, function (error, db) {
-        if (error) {
-            res.status(401).send({"success": false, "message": "خطایی رخ داده است.", "result": error});
-        }
-        let query = {task: req.body.task};
-        db.collection("tasks").find(query).toArray((err, collection) => {
-            if (err) throw err;
-            if (collection.length === 1) {
-                res.send({"success": true, "message": "عملیات با موفقیت انجام شد.", "data": collection[0]});
-            } else if (collection.length === 0) {
-                res.send({"success": true, "message": "عملیات با موفقیت انجام شد.", "data": null});
-            } else {
-                res.status(401).send({"success": false, "message": "خطایی رخ داده است.", "result": collection});
-            }
-            db.close();
-        });
-    });
-});
-
-
-app.post('/login', function (req, res) {
-    res.send({"success": true, "message": "کاربر معتبر می باشد"});
-});
-
-// bot.on('message', (message) => {
-//     bot.sendMessage(message.chat.id, "HI");
-// });
-
-
-app.listen(8081, function () {
-    console.log("SERVER IS UP")
+    logger.info(`*** ${String(config.get('Level')).toUpperCase()} ***`);
+    logger.info(`Server running on port ${config.get('PORT')}`);
 });
