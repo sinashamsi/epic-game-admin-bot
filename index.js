@@ -13,6 +13,7 @@ const {Post} = require('./model/post');
 const {ScheduledTask} = require('./model/scheduled-task');
 const {PublishPostHistory} = require('./model/publish-post-history');
 const {AutoPostBasicInfo} = require('./model/auto-post-basic-info');
+const {Education} = require('./model/education');
 const {authenticate} = require('./middleware/authenticate');
 const {handleResponse, getCurrentDateTime, convertPersianDateToGregorian} = require('./utils/utils');
 const {getCategoryElement} = require('./utils/categories');
@@ -33,6 +34,17 @@ process.env.NTBA_FIX_319 = 1;
 const bot = new TelegramBot(config.get('TELEGRAM_BOT_TOKEN'), {polling: true});
 let scheduledTasks = [];
 let autoPostTaskMap = new Map();
+
+let telegramOption = {
+    "parse_mode": "html",
+    "reply_markup": {
+        "one_time_keyboard": true,
+        "keyboard": [
+            [{text: "سوالات"}, {text: "خرید"}],
+            [{text: "ارتباط با پشتیبان"}]
+        ]
+    }
+};
 
 let addScheduledTaskToAutoPostTaskMap = (user, scheduledTask) => {
     let oldTask = autoPostTaskMap.get(user.username);
@@ -115,6 +127,17 @@ let executeAutoPost = async (basicInfo) => {
             const posts = [...favouritePosts, ...normalPosts];
             if (posts.length != 0) {
                 posts.forEach(async (post) => {
+                    if (post.publishHistory.length !== 0) {
+                        post.publishHistory.forEach(async (publishPostHistory) => {
+                            if (publishPostHistory.active) {
+                                bot.deleteMessage(post.user.channelChatIdentifier, publishPostHistory.identifier).then(async () => {
+                                    await PublishPostHistory.makeDeActivePublishPostHistory(publishPostHistory._id);
+                                }).catch((e) => {
+                                    return Promise.reject(e);
+                                });
+                            }
+                        })
+                    }
                     await sendPost(post.user, post.identifier, basicInfo.silent);
                 })
             }
@@ -144,6 +167,29 @@ let sendPost = async (user, identifier, silent) => {
         } else {
             return Promise.reject("INVALID POST STATUS");
         }
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
+
+let removePost = async (user, identifier, shouldChangePostStatus) => {
+    try {
+        let post = await Post.findPost(user, identifier);
+        if (post.publishHistory.length !== 0) {
+            post.publishHistory.forEach(async (item) => {
+                let publishPostHistory = await PublishPostHistory.loadById(item);
+                if (publishPostHistory.active) {
+                    bot.deleteMessage(user.channelChatIdentifier, publishPostHistory.identifier).then(async () => {
+                        await PublishPostHistory.makeDeActivePublishPostHistory(publishPostHistory._id);
+                    });
+                }
+            })
+        }
+        if (shouldChangePostStatus) {
+            let status = getCategoryElement('DELETED_POST_STATUS');
+            await Post.updatePostStatus(post._id, status);
+        }
+        return Promise.resolve(post);
     } catch (e) {
         return Promise.reject(e);
     }
@@ -296,11 +342,12 @@ app.post('/api/search-scheduled-task', authenticate, async (req, res) => {
 
 app.post('/api/register-post', authenticate, async (req, res) => {
     try {
-        const body = _.pick(req.body, ['title', 'content', 'attributes', 'favourite']);
+        const body = _.pick(req.body, ['title', 'amount', 'content', 'attributes', 'favourite']);
 
         const joiSchema = {
             favourite: Joi.boolean().required(),
-            title: Joi.string().required(),
+            title: Joi.string().optional(),
+            amount: Joi.number().optional(),
             content: Joi.string().required(),
             attributes: Joi.array().max(10).items(
                 Joi.object(
@@ -333,12 +380,13 @@ app.post('/api/register-post', authenticate, async (req, res) => {
 
 app.post('/api/update-post', authenticate, async (req, res) => {
     try {
-        const body = _.pick(req.body, ['identifier', 'title', 'content', 'attributes', 'favourite']);
+        const body = _.pick(req.body, ['identifier', 'title', 'amount', 'content', 'attributes', 'favourite']);
 
         const joiSchema = {
             favourite: Joi.boolean().required(),
             identifier: Joi.number().required(),
-            title: Joi.string().required(),
+            title: Joi.string().optional(),
+            amount: Joi.number().optional(),
             content: Joi.string().required(),
             attributes: Joi.array().max(10).items(
                 Joi.object(
@@ -459,25 +507,34 @@ app.post('/api/delete-post', authenticate, async (req, res) => {
         handleResponse(res, false, validateResult.error);
     } else {
         try {
-            let post = await Post.findPost(req.user, body.identifier);
-            if (post.publishHistory.length !== 0) {
-                post.publishHistory.forEach(async (item) => {
-                    let publishPostHistory = await PublishPostHistory.loadById(item);
-                    if (publishPostHistory.active) {
-                        bot.deleteMessage(req.user.channelChatIdentifier, publishPostHistory.identifier).then(async () => {
-                            await PublishPostHistory.makeDeActivePublishPostHistory(publishPostHistory._id);
-                        });
-                    }
-                })
-            }
-            let status = getCategoryElement('DELETED_POST_STATUS');
-            await Post.updatePostStatus(post._id, status);
+            await removePost(req.user, body.identifier, true);
             handleResponse(res, true, body);
         } catch (e) {
             handleResponse(res, false, e);
         }
     }
 });
+
+
+app.post('/api/remove-post', authenticate, async (req, res) => {
+    const body = _.pick(req.body, ['identifier']);
+    const joiSchema = {
+        identifier: Joi.number().required()
+    };
+    let validateResult = Joi.validate(body, joiSchema);
+
+    if (validateResult.error) {
+        handleResponse(res, false, validateResult.error);
+    } else {
+        try {
+            await removePost(req.user, body.identifier, false);
+            handleResponse(res, true, body);
+        } catch (e) {
+            handleResponse(res, false, e);
+        }
+    }
+});
+
 
 app.post('/api/delete-all-post', authenticate, async (req, res) => {
     try {
@@ -499,6 +556,104 @@ app.post('/api/delete-all-post', authenticate, async (req, res) => {
         handleResponse(res, true, "OPERATION HAS BEAN DONE");
     } catch (e) {
         handleResponse(res, false, e);
+    }
+});
+
+
+app.post('/api/register-education', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['question', 'answer']);
+
+        const joiSchema = {
+            question: Joi.string().required(),
+            answer: Joi.string().required()
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            body.creationDateTime = getCurrentDateTime();
+            body.lastUpdateDateTime = getCurrentDateTime();
+            let education = new Education(body);
+            await education.save();
+            handleResponse(res, true, body);
+        }
+    } catch (e) {
+        console.log(e)
+        handleResponse(res, false, e);
+    }
+});
+
+
+app.post('/api/update-education', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['question', 'answer', 'identifier']);
+
+        const joiSchema = {
+            question: Joi.string().required(),
+            answer: Joi.string().required()
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            let oldEducation = await Education.loadById(body.identifier);
+            body.creationDateTime = oldEducation.creationDateTime;
+            body.lastUpdateDateTime = getCurrentDateTime();
+            await Education.updateEducation(body);
+            handleResponse(res, true, body);
+        }
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+
+bot.onText(/^\/start/, function (msg) {
+    let message = `کاربر گرامی ${msg.from.username}, به ربات آنلاین اپیك گيم مرجع تخصصى و كامل انواع اکانت های ترکیبی خوش آمدید.\n`;
+    bot.sendMessage(msg.chat.id, message +
+        "امکانت ربات EpicGame شامل :\n" +
+        "1- خرید آنلاین\n" +
+        "2- مشاهده سوالات رایج به همراه پاسخ های آن ها\n" +
+        "برای شروع کافیست یکی از گزینه های منو زیر را فشار دهید", telegramOption);
+});
+
+bot.onText(/سوالات/, async function onEducation(msg) {
+    let educations = await Education.loadAllEducationInfo();
+    let educationInfos = [];
+    educations.forEach((education) => {
+        educationInfos.push([{text: education.question, callback_data: education._id}])
+    });
+    const option = {
+        reply_markup: {
+            one_time_keyboard: true,
+            resize_keyboard: true,
+            inline_keyboard: educationInfos
+        }
+    };
+    bot.sendMessage(msg.chat.id, "از بین سوالات زیر سوال مورد نظر خود را انتخاب کنید ؟", option);
+});
+
+
+bot.onText(/خرید/, async function onEducation(msg) {
+    bot.sendMessage(msg.chat.id, "این بخش به زودی راه اندازی خواهد شد.", telegramOption);
+});
+
+
+bot.onText(/ارتباط با پشتیبان/, async function onEducation(msg) {
+    bot.sendMessage(msg.chat.id, "@EGseller", telegramOption);
+});
+
+
+bot.on('callback_query', async function (msg) {
+    try {
+        console.log(msg.data);
+        let education = await Education.loadById(msg.data);
+        bot.sendMessage(msg.from.id, education.answer, telegramOption);
+    } catch (e) {
+        console.log(e);
     }
 });
 

@@ -6,7 +6,7 @@ const {getCurrentDateTime} = require('./../utils/utils');
 let PostSchema = new mongoose.Schema({
     title: {
         type: String,
-        required: true,
+        required: false,
         trim: true
     },
     content: {
@@ -17,6 +17,10 @@ let PostSchema = new mongoose.Schema({
     identifier: {
         type: Number,
         required: true
+    },
+    amount: {
+        type: Number,
+        required: false
     },
     active: {
         type: Boolean,
@@ -156,7 +160,7 @@ PostSchema.statics.searchForAutoPost = function (favourite, numberOfPost) {
             favourite : favourite ,
             "status.name": {$ne: "DELETED_POST_STATUS"}
         }
-    ).populate('user').limit(numberOfPost).sort({
+    ).populate('user', 'publishHistory').limit(numberOfPost).sort({
         lastUpdateDateTime: 1,
         identifier: 1
     }).exec().then(searchResultArray => {
