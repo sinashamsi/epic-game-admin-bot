@@ -263,19 +263,19 @@ app.post('/api/save-or-update-auto-post-scheduled-task', authenticate, async (re
 
 app.post('/api/sold-post', authenticate, async (req, res) => {
     try {
-        const body = _.pick(req.body, ['soldAmount', 'identifier']);
+        const body = _.pick(req.body, ['identifier']);
         const joiSchema = {
-            identifier: Joi.number().required(),
-            soldAmount: Joi.number().required()
+            identifier: Joi.number().required()
         };
         let validateResult = Joi.validate(body, joiSchema);
 
         if (validateResult.error) {
             handleResponse(res, false, validateResult.error);
         } else {
-            console.log(body);
+            let status = getCategoryElement('SOLD_POST_STATUS');
             let post = await Post.findPost(req.user, body.identifier);
-            await post.salePost(body.soldAmount);
+            await removePost(req.user, body.identifier, false);
+            await Post.updatePostStatus(post._id, status);
             handleResponse(res, true, post);
         }
     } catch (e) {
@@ -721,6 +721,13 @@ bot.on('callback_query', async function (msg) {
 
 
 app.listen(config.get('PORT'), async () => {
+    // var j = schedule.scheduleJob({hour: 0, minute: 0}, function(){
+    //     walk.on('dir', function (dir, stat) {
+    //         uploadDir.push(dir);
+    //     });
+    // });
+
+
     initAutoPostBasicInfo().then(() => {
         logger.info(`INIT AUTO POST BASIC INFO DONE`);
     }).catch((e) => {

@@ -23,10 +23,6 @@ let PostSchema = new mongoose.Schema({
         type: Number,
         required: false
     },
-    soldAmount: {
-        type: Number,
-        required: false
-    },
     active: {
         type: Boolean,
         required: true
@@ -110,20 +106,6 @@ PostSchema.statics.findPost = function (user, identifier) {
             return Promise.resolve(post);
         }
     });
-};
-
-
-PostSchema.methods.salePost = async function (soldAmount) {
-    try {
-        let post = this;
-        let status = getCategoryElement("SOLD_POST_STATUS");
-        post.status = status;
-        post.soldAmount = soldAmount;
-        await post.save();
-        return Promise.resolve(post);
-    } catch (e) {
-        return Promise.reject(e);
-    }
 };
 
 
