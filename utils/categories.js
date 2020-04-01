@@ -14,6 +14,10 @@ const categories = [
             {
                 name: "DELETED_POST_STATUS",
                 persianName: "حذف شده"
+            },
+            {
+                name: "SOLD_POST_STATUS",
+                persianName: "فروخته شده"
             }
         ]
     },

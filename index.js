@@ -261,6 +261,63 @@ app.post('/api/save-or-update-auto-post-scheduled-task', authenticate, async (re
 });
 
 
+app.post('/api/sold-post', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['soldAmount', 'identifier']);
+        const joiSchema = {
+            identifier: Joi.number().required(),
+            soldAmount: Joi.number().required()
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            console.log(body);
+            let post = await Post.findPost(req.user, body.identifier);
+            await post.salePost(body.soldAmount);
+            handleResponse(res, true, post);
+        }
+    } catch (e) {
+        console.log(e);
+        handleResponse(res, false, e);
+    }
+});
+
+
+app.post('/api/save-or-update-default-post-attributes', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['defaultAttributes']);
+        const joiSchema = {
+            defaultAttributes: Joi.array().optional().items(Joi.string().required())
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            await req.user.updateUserDefaultAttributes(body.defaultAttributes);
+            handleResponse(res, true, req.user.defaultAttributes);
+        }
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+app.post('/api/fetch-user-default-post-attributes', authenticate, async (req, res) => {
+    handleResponse(res, true, req.user.defaultAttributes);
+});
+
+
+app.post('/api/fetch-auto-post-scheduled-task', authenticate, async (req, res) => {
+    try {
+        let basicInfo = await AutoPostBasicInfo.loadBasicInfoByUser(req.user);
+        handleResponse(res, true, basicInfo);
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
 app.post('/api/register-scheduled-task', authenticate, async (req, res) => {
     try {
         const body = _.pick(req.body, ['executeDateTime', 'identifiers', 'silent']);
@@ -307,6 +364,7 @@ app.post('/api/search-scheduled-task', authenticate, async (req, res) => {
                 pageNumber: Joi.number().required()
             }),
         };
+        Object.keys(body).forEach((key) => (body[key] === null || body[key] === '') && delete body[key]);
         let validateResult = Joi.validate(body, joiSchema);
 
         if (validateResult.error) {
@@ -358,6 +416,7 @@ app.post('/api/register-post', authenticate, async (req, res) => {
                 )
             )
         };
+        Object.keys(body).forEach((key) => (body[key] === null || body[key] === '') && delete body[key]);
         let validateResult = Joi.validate(body, joiSchema);
 
         if (validateResult.error) {
@@ -397,6 +456,7 @@ app.post('/api/update-post', authenticate, async (req, res) => {
                 )
             )
         };
+        Object.keys(body).forEach((key) => (body[key] === null || body[key] === '') && delete body[key]);
         let validateResult = Joi.validate(body, joiSchema);
 
         if (validateResult.error) {
@@ -444,6 +504,8 @@ app.post('/api/search-post', authenticate, async (req, res) => {
                 name: Joi.string().required()
             })
         };
+        Object.keys(body).forEach((key) => (body[key] === null || body[key] === '') && delete body[key]);
+        console.log(body);
         let validateResult = Joi.validate(body, joiSchema);
 
         if (validateResult.error) {

@@ -37,13 +37,31 @@ let UserSchema = new mongoose.Schema({
             type: String,
             required: true
         }
-    }]
+    }],
+    defaultAttributes: [
+        {
+            type: String,
+            trim: true
+        }
+    ]
 });
 
 UserSchema.methods.toJSON = function () {
     let user = this;
     let userObject = user.toObject();
     return _.pick(userObject, ['name', 'username']);
+};
+
+
+UserSchema.methods.updateUserDefaultAttributes = async function (defaultAttributes) {
+    let user = this;
+    try {
+        user.defaultAttributes = defaultAttributes;
+        await user.save();
+        return Promise.resolve(defaultAttributes);
+    } catch (e) {
+        return Promise.reject(e);
+    }
 };
 
 UserSchema.statics.findByCredentials = function (username, password) {

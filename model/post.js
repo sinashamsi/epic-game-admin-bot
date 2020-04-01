@@ -2,6 +2,7 @@ const {mongoose} = require('./../db/mongoose');
 const {removeFromModel} = require('./../utils/utils');
 const {PublishPostHistory} = require('./publish-post-history');
 const {getCurrentDateTime} = require('./../utils/utils');
+const {getCategoryElement} = require('./../utils/categories');
 
 let PostSchema = new mongoose.Schema({
     title: {
@@ -19,6 +20,10 @@ let PostSchema = new mongoose.Schema({
         required: true
     },
     amount: {
+        type: Number,
+        required: false
+    },
+    soldAmount: {
         type: Number,
         required: false
     },
@@ -108,6 +113,20 @@ PostSchema.statics.findPost = function (user, identifier) {
 };
 
 
+PostSchema.methods.salePost = async function (soldAmount) {
+    try {
+        let post = this;
+        let status = getCategoryElement("SOLD_POST_STATUS");
+        post.status = status;
+        post.soldAmount = soldAmount;
+        await post.save();
+        return Promise.resolve(post);
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
+
+
 PostSchema.statics.findNextIdentifier = function (user) {
     let Post = this;
     let nextIdentifier = 100;
@@ -160,7 +179,7 @@ PostSchema.statics.searchForAutoPost = function (favourite, numberOfPost) {
             favourite : favourite ,
             "status.name": {$ne: "DELETED_POST_STATUS"}
         }
-    ).populate('user', 'publishHistory').limit(numberOfPost).sort({
+    ).populate('user publishHistory').limit(numberOfPost).sort({
         lastUpdateDateTime: 1,
         identifier: 1
     }).exec().then(searchResultArray => {
