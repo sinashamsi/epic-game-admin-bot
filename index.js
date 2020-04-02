@@ -172,7 +172,7 @@ let sendPost = async (user, identifier, silent) => {
     }
 };
 
-let removePost = async (user, identifier, shouldChangePostStatus) => {
+let removePost = async (user, identifier, statusName) => {
     try {
         let post = await Post.findPost(user, identifier);
         if (post.publishHistory.length !== 0) {
@@ -185,11 +185,33 @@ let removePost = async (user, identifier, shouldChangePostStatus) => {
                 }
             })
         }
-        if (shouldChangePostStatus) {
-            let status = getCategoryElement('DELETED_POST_STATUS');
-            await Post.updatePostStatus(post._id, status);
-        }
+        let status = getCategoryElement(statusName);
+        await Post.updatePostStatus(post._id, status);
         return Promise.resolve(post);
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
+
+
+let removeAllPost = async (user, statusName) => {
+    try {
+        let publishHistoryArray = await PublishPostHistory.findActivePost();
+        if (publishHistoryArray.length !== 0) {
+            publishHistoryArray.forEach(async (publishPostHistory) => {
+                let post = publishPostHistory.post;
+                let status = getCategoryElement(statusName);
+                await Post.updatePostStatus(post._id, status);
+                if (publishPostHistory.active) {
+                    bot.deleteMessage(user.channelChatIdentifier, publishPostHistory.identifier).then(async () => {
+                        await PublishPostHistory.makeDeActivePublishPostHistory(publishPostHistory._id);
+                    }).catch((e) => {
+                        return Promise.reject(e);
+                    });
+                }
+            })
+        }
+        return Promise.resolve(publishHistoryArray);
     } catch (e) {
         return Promise.reject(e);
     }
@@ -272,11 +294,8 @@ app.post('/api/sold-post', authenticate, async (req, res) => {
         if (validateResult.error) {
             handleResponse(res, false, validateResult.error);
         } else {
-            let status = getCategoryElement('SOLD_POST_STATUS');
-            let post = await Post.findPost(req.user, body.identifier);
-            await removePost(req.user, body.identifier, false);
-            await Post.updatePostStatus(post._id, status);
-            handleResponse(res, true, post);
+            await removePost(req.user, body.identifier, 'SOLD_POST_STATUS');
+            handleResponse(res, true, "POST HAS BEAN SOLD");
         }
     } catch (e) {
         console.log(e);
@@ -550,6 +569,7 @@ app.post('/api/send-post', authenticate, async (req, res) => {
         handleResponse(res, false, validateResult.error);
     } else {
         try {
+            await removePost(req.user, body.identifier, 'REGISTERED_POST_STATUS');
             await sendPost(req.user, body.identifier, body.silent);
             handleResponse(res, true, body);
         } catch (e) {
@@ -569,7 +589,7 @@ app.post('/api/delete-post', authenticate, async (req, res) => {
         handleResponse(res, false, validateResult.error);
     } else {
         try {
-            await removePost(req.user, body.identifier, true);
+            await removePost(req.user, body.identifier, 'DELETED_POST_STATUS');
             handleResponse(res, true, body);
         } catch (e) {
             handleResponse(res, false, e);
@@ -589,7 +609,7 @@ app.post('/api/remove-post', authenticate, async (req, res) => {
         handleResponse(res, false, validateResult.error);
     } else {
         try {
-            await removePost(req.user, body.identifier, false);
+            await removePost(req.user, body.identifier, 'REGISTERED_POST_STATUS');
             handleResponse(res, true, body);
         } catch (e) {
             handleResponse(res, false, e);
@@ -600,27 +620,21 @@ app.post('/api/remove-post', authenticate, async (req, res) => {
 
 app.post('/api/delete-all-post', authenticate, async (req, res) => {
     try {
-        let publishHistoryArray = await PublishPostHistory.findActivePost();
-        if (publishHistoryArray.length !== 0) {
-            publishHistoryArray.forEach(async (publishPostHistory) => {
-                let post = publishPostHistory.post;
-                let status = getCategoryElement('DELETED_POST_STATUS');
-                await Post.updatePostStatus(post._id, status);
-                if (publishPostHistory.active) {
-                    bot.deleteMessage(req.user.channelChatIdentifier, publishPostHistory.identifier).then(async () => {
-                        await PublishPostHistory.makeDeActivePublishPostHistory(publishPostHistory._id);
-                    }).catch((e) => {
-                        handleResponse(res, false, e);
-                    });
-                }
-            })
-        }
+        await removeAllPost(req.user, 'DELETED_POST_STATUS');
         handleResponse(res, true, "OPERATION HAS BEAN DONE");
     } catch (e) {
         handleResponse(res, false, e);
     }
 });
 
+app.post('/api/remove-all-post', authenticate, async (req, res) => {
+    try {
+        await removeAllPost(req.user, 'REGISTERED_POST_STATUS');
+        handleResponse(res, true, "OPERATION HAS BEAN DONE");
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
 
 app.post('/api/register-education', authenticate, async (req, res) => {
     try {
