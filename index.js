@@ -49,7 +49,9 @@ let telegramOption = {
 let addScheduledTaskToAutoPostTaskMap = (user, scheduledTask) => {
     let oldTask = autoPostTaskMap.get(user.username);
     if (oldTask) {
+        oldTask.active = false;
         oldTask.cancel();
+        autoPostTaskMap.delete(oldTask);
     }
     autoPostTaskMap.set(user.username, scheduledTask);
 };
