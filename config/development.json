@@ -1,9 +1,9 @@
 {
   "Level": "development",
   "PORT": 8081,
-  "MONGO_URI": "mongodb://localhost:27017/epic-game",
+  "MONGO_URI": "mongodb://epicgame_bot:ss09302282702@localhost:27017/epicgame_bot",
   "JWT_SECRET": "epic-game",
-  "TELEGRAM_BOT_TOKEN": "1099273184:AAFBRyPWCTSk_JIx7ubafRf_8MORDxMIriw",
+  "TELEGRAM_BOT_TOKEN": "929340112:AAGq72Rsxrx6JY9U9pqxLqe7nuzviq-U9zw",
   "NTBA_FIX_319": 1,
   "VERIFICATION_TIMEOUT" : 120,
   "ACTION_CODE_TIMEOUT" : 3600,

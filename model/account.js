@@ -59,7 +59,7 @@ AccountSchema.statics.findByCredentials = function (username, password) {
                 if (res) {
                     resolve(account);
                 } else {
-                    reject();
+                    reject("کلمه عبور نا معتبر می باشد");
                 }
             });
         });
