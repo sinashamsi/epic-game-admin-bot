@@ -1,6 +1,6 @@
 const {mongoose} = require('./../db/mongoose');
 const {getCurrentDateTime} = require('./../utils/utils');
-const {getCategoryElement} = require('./../utils/categories');
+const {getCategoryElement, Constant} = require('./../service/categories-service');
 
 let scheduledTaskSchema = new mongoose.Schema({
     executeDateTime: {
@@ -59,7 +59,7 @@ scheduledTaskSchema.statics.loadById = function (id) {
 scheduledTaskSchema.statics.loadAllRegisteredScheduledTask = function () {
     let scheduledTask = this;
     return scheduledTask.find({
-        status: getCategoryElement("REGISTERED_SCHEDULED_TASK_STATUS"),
+        status: getCategoryElement(Constant.REGISTERED_SCHEDULED_TASK_STATUS),
     }).populate('user');
 };
 

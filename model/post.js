@@ -2,7 +2,7 @@ const {mongoose} = require('./../db/mongoose');
 const {removeFromModel} = require('./../utils/utils');
 const {PublishPostHistory} = require('./publish-post-history');
 const {getCurrentDateTime} = require('./../utils/utils');
-const {getCategoryElement} = require('./../utils/categories');
+const {Constant} = require('./../service/categories-service');
 
 let PostSchema = new mongoose.Schema({
     title: {
@@ -159,7 +159,7 @@ PostSchema.statics.searchForAutoPost = function (favourite, numberOfPost) {
     return Post.find(
         {
             favourite : favourite ,
-            "status.name": {$ne: "DELETED_POST_STATUS"}
+            "status.name": {$ne: Constant.DELETED_POST_STATUS}
         }
     ).populate('user publishHistory').limit(numberOfPost).sort({
         lastUpdateDateTime: 1,

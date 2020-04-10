@@ -1,9 +1,7 @@
-const bcrypt = require('bcryptjs');
 const _ = require('lodash');
-const jwt = require('jsonwebtoken');
-const config = require('config');
 
 const {mongoose} = require('../db/mongoose');
+const {Account} = require('./account');
 
 let UserSchema = new mongoose.Schema({
     name: {
@@ -11,17 +9,6 @@ let UserSchema = new mongoose.Schema({
         required: true,
         minlength: 3,
         trim: true
-    },
-    username: {
-        type: String,
-        required: true,
-        unique: true,
-        trim: true,
-    },
-    password: {
-        type: String,
-        minlength: 6,
-        required: true
     },
     channelChatIdentifier: {
         type: String,
@@ -31,25 +18,19 @@ let UserSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    tokens: [{
-        _id: false,
-        token: {
-            type: String,
-            required: true
-        }
-    }],
     defaultAttributes: [
         {
             type: String,
             trim: true
         }
-    ]
+    ],
+    accounts: [{type: mongoose.Schema.ObjectId, ref: 'Account'}]
 });
 
 UserSchema.methods.toJSON = function () {
     let user = this;
     let userObject = user.toObject();
-    return _.pick(userObject, ['name', 'username']);
+    return _.pick(userObject, ['name']);
 };
 
 
@@ -64,69 +45,28 @@ UserSchema.methods.updateUserDefaultAttributes = async function (defaultAttribut
     }
 };
 
-UserSchema.statics.findByCredentials = function (username, password) {
+
+UserSchema.statics.findByAccount = function (account) {
     let User = this;
-
-    return User.findOne({username}).then((user) => {
-        if (!user) {
-            return Promise.reject();
-        }
-        return new Promise((resolve, reject) => {
-            bcrypt.compare(password, user.password, (err, res) => {
-                if (res) {
-                    resolve(user);
-                } else {
-                    reject();
-                }
-            });
-        });
-    });
-};
-
-UserSchema.statics.findByToken = function (token) {
-    let User = this;
-    let decoded;
-
-    try {
-        decoded = jwt.verify(token, config.get('JWT_SECRET'));
-    } catch (e) {
-        return Promise.reject();
-    }
-
     return User.findOne({
-        _id: decoded._id,
-        'tokens.token': token
+        'accounts': mongoose.Types.ObjectId(account._id)
     });
 };
 
-UserSchema.methods.removeToken = function () {
-    let user = this;
-    return user.updateOne({tokens: []});
-};
+UserSchema.statics.persist = async function (info) {
+    let User = this;
+    try {
+        let accounts = await Account.persist(info.accounts);
+        const userInfo = _.pick(info, ['name', 'channelChatIdentifier', 'adminChatIdentifier']);
+        userInfo.accounts = accounts;
 
-UserSchema.methods.generateAuthToken = function () {
-    let user = this;
-    let token = jwt.sign({_id: user._id.toHexString()}, config.get('JWT_SECRET')).toString();
-    user.tokens.push({token});
-    return user.save().then(() => {
-        return token;
-    });
-};
-
-UserSchema.pre('save', function (next) {
-    let user = this;
-
-    if (user.isModified('password')) {
-        bcrypt.genSalt(10, (err, salt) => {
-            bcrypt.hash(user.password, salt, (err, hash) => {
-                user.password = hash;
-                next();
-            });
-        });
-    } else {
-        next();
+        let user = new User(userInfo);
+        await user.save();
+        return Promise.resolve(user);
+    } catch (e) {
+        return Promise.resolve(e);
     }
-});
+};
 
 let User = mongoose.model('User', UserSchema);
 

@@ -1,8 +1,13 @@
 {
   "Level": "development",
   "PORT": 8081,
-  "MONGO_URI": "mongodb://epicgame_cms:ss09302282702@localhost:27017/epicgame_cms",
+  "MONGO_URI": "mongodb://localhost:27017/epic-game",
   "JWT_SECRET": "epic-game",
-  "TELEGRAM_BOT_TOKEN": "962939706:AAGlz_-i3lIqXimExBIpEO7oYU2MbxhvSOQ",
-  "NTBA_FIX_319": 1
+  "TELEGRAM_BOT_TOKEN": "1099273184:AAFBRyPWCTSk_JIx7ubafRf_8MORDxMIriw",
+  "NTBA_FIX_319": 1,
+  "VERIFICATION_TIMEOUT" : 120,
+  "ACTION_CODE_TIMEOUT" : 3600,
+  "SMS_USER_API_KEY" : "d6b88f53627633d0e5c48ad6" ,
+  "SMS_SECRET_KEY" : "epic-game",
+  "SMS_TEMPLATE_ID_FOR_LOGIN" : "23319"
 }

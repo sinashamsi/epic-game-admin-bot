@@ -14,10 +14,12 @@ const {ScheduledTask} = require('./model/scheduled-task');
 const {PublishPostHistory} = require('./model/publish-post-history');
 const {AutoPostBasicInfo} = require('./model/auto-post-basic-info');
 const {Education} = require('./model/education');
+const {Account} = require('./model/account');
 const {authenticate} = require('./middleware/authenticate');
 const {handleResponse, getCurrentDateTime, convertPersianDateToGregorian} = require('./utils/utils');
-const {getCategoryElement} = require('./utils/categories');
 const {logger} = require('./utils/winstonOptions');
+const {getCategoryElement, Constant} = require('./service/categories-service');
+const {createVerification, verifyCode, checkActionCode} = require('./service/verification-service');
 
 const app = express();
 app.use(bodyParser.urlencoded({extended: true}));
@@ -109,11 +111,11 @@ let initScheduledTask = async () => {
 
 let executeScheduledTask = async (task) => {
     try {
-        await ScheduledTask.updateScheduledTaskStatus(task._id, 'RUNNING_SCHEDULED_TASK_STATUS');
+        await ScheduledTask.updateScheduledTaskStatus(task._id, Constant.RUNNING_SCHEDULED_TASK_STATUS);
         if (task.identifiers.length != 0) {
             task.identifiers.forEach(async (identifier) => {
                 await sendPost(task.user, identifier, task.silent);
-                await ScheduledTask.updateScheduledTaskStatus(task._id, 'RAN_SCHEDULED_TASK_STATUS');
+                await ScheduledTask.updateScheduledTaskStatus(task._id, Constant.RAN_SCHEDULED_TASK_STATUS);
             })
         }
     } catch (e) {
@@ -152,13 +154,13 @@ let executeAutoPost = async (basicInfo) => {
 let sendPost = async (user, identifier, silent) => {
     try {
         let post = await Post.findPost(user, identifier);
-        if (post.status.name !== 'DELETED_POST_STATUS') {
+        if (post.status.name !== Constant.DELETED_POST_STATUS) {
             await bot.sendMessage(user.channelChatIdentifier, '#EG' + post.identifier + '\n' + post.content, {
                 disable_notification: silent,
                 parse_mode: 'html'
             }).then(async (result) => {
                 if (result.message_id) {
-                    let status = getCategoryElement('SENT_POST_STATUS');
+                    let status = getCategoryElement(Constant.SENT_POST_STATUS);
                     await Post.updatePostStatus(post._id, status);
                     await post.addPublishPostHistory(result.message_id);
                     return Promise.resolve(result);
@@ -219,28 +221,114 @@ let removeAllPost = async (user, statusName) => {
     }
 };
 
-app.post('/api/register-user', async (req, res) => {
+
+app.post('/api/create-verification', async (req, res) => {
     try {
-        const body = _.pick(req.body, ['name', 'username', 'password', 'channelChatIdentifier', 'adminChatIdentifier']);
-        let user = new User(body);
-        await user.save();
-        handleResponse(res, true, user);
+        const body = _.pick(req.body, ['mobileNumber', 'actionName']);
+        const joiSchema = {
+            mobileNumber: Joi.string().max(11).min(11).required(),
+            actionName: Joi.string().required()
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+        if (!validateResult.error) {
+            let result = await createVerification(body.mobileNumber, body.actionName);
+            handleResponse(res, true, result);
+        } else {
+            handleResponse(res, false, validateResult.error);
+        }
     } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+app.post('/api/verify', async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['mobileNumber', 'actionName', 'verificationCode']);
+        const joiSchema = {
+            mobileNumber: Joi.string().max(11).min(11).required(),
+            actionName: Joi.string().required(),
+            verificationCode: Joi.number().required()
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+        if (!validateResult.error) {
+            let result = await verifyCode(body.mobileNumber, body.actionName, body.verificationCode);
+
+            handleResponse(res, true, result);
+        } else {
+            handleResponse(res, false, validateResult.error);
+        }
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+app.post('/api/register-user', async (req, res) => {
+
+    try {
+        const body = _.pick(req.body, ['name', 'channelChatIdentifier', 'adminChatIdentifier', 'accounts']);
+        const joiSchema = {
+            name: Joi.string().required(),
+            channelChatIdentifier: Joi.string().required(),
+            adminChatIdentifier: Joi.string().required(),
+            accounts: Joi.array().required().min(1).items(
+                Joi.object(
+                    {
+                        name: Joi.string().required(),
+                        username: Joi.string().required(),
+                        password: Joi.string().required(),
+                        mobileNumber: Joi.string().max(11).min(11).required(),
+                        roles: Joi.array().optional(),
+                    }
+                )
+            )
+        };
+        Object.keys(body).forEach((key) => (body[key] === null || body[key] === '') && delete body[key]);
+        let validateResult = Joi.validate(body, joiSchema);
+        if (!validateResult.error) {
+            let user = await User.persist(body);
+            handleResponse(res, true, user);
+        } else {
+            handleResponse(res, false, validateResult.error);
+        }
+    } catch (e) {
+        console.log(e)
         handleResponse(res, false, e);
     }
 });
 
 app.post('/api/login', async (req, res) => {
     try {
-        const body = _.pick(req.body, ['username', 'password']);
+        const body = _.pick(req.body, ['username', 'password', 'mobileNumber', 'actionName', 'actionKey']);
+        const joiSchema = {
+            mobileNumber: Joi.string().max(11).min(11).required(),
+            actionName: Joi.string().required(),
+            actionKey: Joi.string().required(),
+            username: Joi.string().required(),
+            password: Joi.string().required()
+        };
+        Object.keys(body).forEach((key) => (body[key] === null || body[key] === '') && delete body[key]);
 
-        let user = await User.findByCredentials(body.username, body.password);
-        let token = await user.generateAuthToken();
-        res.header('x-auth', token).status(200).send({success: true, data: token});
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (!validateResult.error) {
+            await checkActionCode(body.mobileNumber, body.actionName, body.actionKey, Constant.LOGIN_VERIFICATION_ACTION_TYPE);
+            let account = await Account.findByCredentials(body.username, body.password);
+            let token = await account.generateAuthToken();
+            res.header('x-auth', token).status(200).send({success: true, data: token});
+        } else {
+            handleResponse(res, false, validateResult.error);
+        }
     } catch (e) {
-        res.status(400).json({
-            Error: `Something went wrong. ${e}`
-        });
+        handleResponse(res, false, e);
+    }
+});
+
+app.post('/api/logout', authenticate, async (req, res) => {
+    try {
+        await req.account.removeToken(req.token);
+        handleResponse(res, true, "OPERATION HAS BEAN DONE");
+    } catch (e) {
+        handleResponse(res, false, e);
     }
 });
 
@@ -296,7 +384,7 @@ app.post('/api/sold-post', authenticate, async (req, res) => {
         if (validateResult.error) {
             handleResponse(res, false, validateResult.error);
         } else {
-            await removePost(req.user, body.identifier, 'SOLD_POST_STATUS');
+            await removePost(req.user, body.identifier, Constant.SOLD_POST_STATUS);
             handleResponse(res, true, "POST HAS BEAN SOLD");
         }
     } catch (e) {
@@ -358,7 +446,7 @@ app.post('/api/register-scheduled-task', authenticate, async (req, res) => {
                 body.creationDateTime = getCurrentDateTime();
                 body.lastUpdateDateTime = getCurrentDateTime();
                 body.user = req.user;
-                body.status = getCategoryElement('REGISTERED_SCHEDULED_TASK_STATUS');
+                body.status = getCategoryElement(Constant.REGISTERED_SCHEDULED_TASK_STATUS);
                 let task = new ScheduledTask(body);
                 await task.save();
                 scheduledRegisteredTask(task);
@@ -448,7 +536,7 @@ app.post('/api/register-post', authenticate, async (req, res) => {
             body.lastUpdateDateTime = getCurrentDateTime();
             body.user = req.user;
             body.identifier = await Post.findNextIdentifier(body.user);
-            body.status = getCategoryElement('REGISTERED_POST_STATUS');
+            body.status = getCategoryElement(Constant.REGISTERED_POST_STATUS);
             let post = new Post(body);
             await post.save();
             handleResponse(res, true, body);
@@ -526,7 +614,6 @@ app.post('/api/search-post', authenticate, async (req, res) => {
             })
         };
         Object.keys(body).forEach((key) => (body[key] === null || body[key] === '') && delete body[key]);
-        console.log(body);
         let validateResult = Joi.validate(body, joiSchema);
 
         if (validateResult.error) {
@@ -571,7 +658,7 @@ app.post('/api/send-post', authenticate, async (req, res) => {
         handleResponse(res, false, validateResult.error);
     } else {
         try {
-            await removePost(req.user, body.identifier, 'REGISTERED_POST_STATUS');
+            await removePost(req.user, body.identifier, Constant.REGISTERED_POST_STATUS);
             await sendPost(req.user, body.identifier, body.silent);
             handleResponse(res, true, body);
         } catch (e) {
@@ -591,7 +678,7 @@ app.post('/api/delete-post', authenticate, async (req, res) => {
         handleResponse(res, false, validateResult.error);
     } else {
         try {
-            await removePost(req.user, body.identifier, 'DELETED_POST_STATUS');
+            await removePost(req.user, body.identifier, Constant.DELETED_POST_STATUS);
             handleResponse(res, true, body);
         } catch (e) {
             handleResponse(res, false, e);
@@ -611,7 +698,7 @@ app.post('/api/remove-post', authenticate, async (req, res) => {
         handleResponse(res, false, validateResult.error);
     } else {
         try {
-            await removePost(req.user, body.identifier, 'REGISTERED_POST_STATUS');
+            await removePost(req.user, body.identifier, Constant.REGISTERED_POST_STATUS);
             handleResponse(res, true, body);
         } catch (e) {
             handleResponse(res, false, e);
@@ -622,7 +709,7 @@ app.post('/api/remove-post', authenticate, async (req, res) => {
 
 app.post('/api/delete-all-post', authenticate, async (req, res) => {
     try {
-        await removeAllPost(req.user, 'DELETED_POST_STATUS');
+        await removeAllPost(req.user, Constant.DELETED_POST_STATUS);
         handleResponse(res, true, "OPERATION HAS BEAN DONE");
     } catch (e) {
         handleResponse(res, false, e);
@@ -631,7 +718,7 @@ app.post('/api/delete-all-post', authenticate, async (req, res) => {
 
 app.post('/api/remove-all-post', authenticate, async (req, res) => {
     try {
-        await removeAllPost(req.user, 'REGISTERED_POST_STATUS');
+        await removeAllPost(req.user, Constant.REGISTERED_POST_STATUS);
         handleResponse(res, true, "OPERATION HAS BEAN DONE");
     } catch (e) {
         handleResponse(res, false, e);
