@@ -10,6 +10,11 @@ let PostSchema = new mongoose.Schema({
         required: false,
         trim: true
     },
+    originalContent: {
+        type: String,
+        required: false,
+        trim: true
+    },
     content: {
         type: String,
         required: true,

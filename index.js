@@ -291,7 +291,6 @@ app.post('/api/register-user', async (req, res) => {
             handleResponse(res, false, validateResult.error);
         }
     } catch (e) {
-        console.log(e)
         handleResponse(res, false, e);
     }
 });
@@ -509,11 +508,12 @@ app.post('/api/search-scheduled-task', authenticate, async (req, res) => {
 
 app.post('/api/register-post', authenticate, async (req, res) => {
     try {
-        const body = _.pick(req.body, ['title', 'amount', 'content', 'attributes', 'favourite']);
+        const body = _.pick(req.body, ['title', 'originalContent', 'amount', 'content', 'attributes', 'favourite']);
 
         const joiSchema = {
             favourite: Joi.boolean().required(),
             title: Joi.string().optional(),
+            originalContent: Joi.string().optional(),
             amount: Joi.number().optional(),
             content: Joi.string().required(),
             attributes: Joi.array().max(10).items(
@@ -579,7 +579,7 @@ app.post('/api/update-post', authenticate, async (req, res) => {
                 post.publishHistory.forEach(async (item) => {
                     let publishPostHistory = await PublishPostHistory.loadById(item);
                     if (publishPostHistory.active) {
-                        bot.editMessageText(body.content, {
+                        bot.editMessageText('#EG' + post.identifier + '\n' + body.content, {
                             chat_id: req.user.channelChatIdentifier,
                             message_id: publishPostHistory.identifier,
                             disable_notification: true,
