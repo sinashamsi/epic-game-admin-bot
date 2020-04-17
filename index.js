@@ -775,6 +775,27 @@ app.post('/api/update-education', authenticate, async (req, res) => {
     }
 });
 
+app.post('/api/update-user-channel-info', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['channelChatIdentifier', 'adminChatIdentifier']);
+
+        const joiSchema = {
+            channelChatIdentifier: Joi.string().required(),
+            adminChatIdentifier: Joi.string().required()
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            await User.updateTelegramInfo(req.user._id, body.channelChatIdentifier, body.adminChatIdentifier);
+            handleResponse(res, true, body);
+        }
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
 
 bot.onText(/^\/start/, function (msg) {
     let message = `کاربر گرامی ${msg.from.username}, به ربات آنلاین اپیك گيم مرجع تخصصى و كامل انواع اکانت های ترکیبی خوش آمدید.\n`;

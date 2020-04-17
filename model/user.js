@@ -2,6 +2,8 @@ const _ = require('lodash');
 
 const {mongoose} = require('../db/mongoose');
 const {Account} = require('./account');
+const {getCurrentDateTime} = require('./../utils/utils');
+
 
 let UserSchema = new mongoose.Schema({
     name: {
@@ -52,6 +54,16 @@ UserSchema.statics.findByAccount = function (account) {
         'accounts': mongoose.Types.ObjectId(account._id)
     });
 };
+
+UserSchema.statics.updateTelegramInfo = function (identifier, channelChatIdentifier, adminChatIdentifier) {
+    let User = this;
+    return User.updateOne({_id: identifier}, {
+        lastUpdateDateTime: getCurrentDateTime(),
+        channelChatIdentifier: channelChatIdentifier,
+        adminChatIdentifier: adminChatIdentifier
+    });
+};
+
 
 UserSchema.statics.persist = async function (info) {
     let User = this;
