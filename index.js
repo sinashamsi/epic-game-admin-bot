@@ -142,6 +142,7 @@ let executeAutoPost = async (basicInfo) => {
                             }
                         })
                     }
+                    console.log("Start Posting with identifier " + post.identifier);
                     await sendPost(post.user, post.identifier, basicInfo.silent);
                 })
             }
@@ -548,11 +549,12 @@ app.post('/api/register-post', authenticate, async (req, res) => {
 
 app.post('/api/update-post', authenticate, async (req, res) => {
     try {
-        const body = _.pick(req.body, ['identifier', 'title', 'amount', 'content', 'attributes', 'favourite']);
+        const body = _.pick(req.body, ['identifier', 'title', 'originalContent', 'amount', 'content', 'attributes', 'favourite']);
 
         const joiSchema = {
             favourite: Joi.boolean().required(),
             identifier: Joi.number().required(),
+            originalContent: Joi.string().optional(),
             title: Joi.string().optional(),
             amount: Joi.number().optional(),
             content: Joi.string().required(),
@@ -796,6 +798,28 @@ app.post('/api/update-user-channel-info', authenticate, async (req, res) => {
     }
 });
 
+app.post('/api/remove-post', authenticate, async (req, res) => {
+    try {
+        const body = _.pick(req.body, ['identifier']);
+
+        const joiSchema = {
+            identifier: Joi.string().required()
+        };
+        let validateResult = Joi.validate(body, joiSchema);
+
+        if (validateResult.error) {
+            handleResponse(res, false, validateResult.error);
+        } else {
+            await Post.deletePost(body.identifier);
+            handleResponse(res, true, body);
+        }
+    } catch (e) {
+        handleResponse(res, false, e);
+    }
+});
+
+
+
 
 bot.onText(/^\/start/, function (msg) {
     let message = `کاربر گرامی ${msg.from.username}, به ربات آنلاین اپیك گيم مرجع تخصصى و كامل انواع اکانت های ترکیبی خوش آمدید.\n`;
@@ -850,7 +874,7 @@ app.listen(config.get('PORT'), async () => {
     //         uploadDir.push(dir);
     //     });
     // });
-
+    // Post.deletePost("100");
 
     initAutoPostBasicInfo().then(() => {
         logger.info(`INIT AUTO POST BASIC INFO DONE`);

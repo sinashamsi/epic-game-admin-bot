@@ -188,6 +188,12 @@ PostSchema.statics.updatePostStatus = function (identifier, status) {
     return Post.updateOne({_id: identifier}, {lastUpdateDateTime: getCurrentDateTime(), status: status});
 };
 
+PostSchema.statics.deletePost =  function (identifier) {
+    let Post = this;
+    Post.findOne({identifier}).remove().exec();
+    return Promise.resolve(identifier);
+};
+
 let Post = mongoose.model('Post', PostSchema);
 
 
