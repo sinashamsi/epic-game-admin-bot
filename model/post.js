@@ -164,7 +164,7 @@ PostSchema.statics.searchForAutoPost = function (favourite, numberOfPost) {
     return Post.find(
         {
             favourite : favourite ,
-            "status.name": {$ne: Constant.DELETED_POST_STATUS}
+            "status.name": {$nin: [Constant.DELETED_POST_STATUS, Constant.SOLD_POST_STATUS]}
         }
     ).populate('user publishHistory').limit(numberOfPost).sort({
         lastUpdateDateTime: 1,

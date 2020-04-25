@@ -126,8 +126,14 @@ let executeScheduledTask = async (task) => {
 let executeAutoPost = async (basicInfo) => {
     try {
         if (basicInfo.active) {
-            let favouritePosts = await Post.searchForAutoPost(true, basicInfo.numberOfFavouritePost);
-            let normalPosts = await Post.searchForAutoPost(false, basicInfo.numberOfNormalPost);
+            let favouritePosts = [];
+            let normalPosts = [];
+            if (basicInfo.numberOfFavouritePost > 0) {
+                favouritePosts = await Post.searchForAutoPost(true, basicInfo.numberOfFavouritePost);
+            }
+            if (basicInfo.numberOfNormalPost > 0) {
+                normalPosts = await Post.searchForAutoPost(false, basicInfo.numberOfNormalPost);
+            }
             const posts = [...favouritePosts, ...normalPosts];
             if (posts.length != 0) {
                 posts.forEach(async (post) => {
