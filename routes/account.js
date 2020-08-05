@@ -15,7 +15,7 @@ router.post('/import', authenticate, async (req, res) => {
             handleResponse(res, false, "file Not Found");
         } else {
             let file = req.files.accounts;
-            let result  = await importAccounts(file, req.user, req.account);
+            let result = await importAccounts(file, req.user, req.account, req.body.shouldRegister, req.body.onlyFavourite);
             handleResponse(res, true, result);
         }
     } catch (e) {

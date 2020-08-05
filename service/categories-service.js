@@ -1,4 +1,5 @@
 let Constant = Object.freeze({
+    NOT_SOLD_POST_STATUS: 'NOT_SOLD_POST_STATUS',
     REGISTERED_WITH_FILE_POST_STATUS: 'REGISTERED_WITH_FILE_POST_STATUS',
     REGISTERED_POST_STATUS: 'REGISTERED_POST_STATUS',
     SENT_POST_STATUS: 'SENT_POST_STATUS',
@@ -48,6 +49,10 @@ const categories = [
             {
                 name: Constant.REGISTERED_WITH_FILE_POST_STATUS,
                 persianName: "ثبت فایلی"
+            },
+            {
+                name: Constant.NOT_SOLD_POST_STATUS,
+                persianName: "فروش نرفته"
             }
         ]
     },

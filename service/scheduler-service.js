@@ -9,7 +9,7 @@ const {ScheduledTask} = require('./../model/scheduled-task');
 const {PublishPostHistory} = require('./../model/publish-post-history');
 const {AutoPostBasicInfo} = require('./../model/auto-post-basic-info');
 const {Post} = require('./../model/post');
-const {Constant} = require('./../service/categories-service');
+const {getCategoryElement, Constant} = require('./../service/categories-service');
 
 
 let scheduledTasks = [];
@@ -57,8 +57,9 @@ let initAutoPostBasicInfo = async () => {
                 scheduledAutoPostBasicInfo(basicInfo);
             });
         }
+        logger.info(`INIT AUTO POST BASIC INFO DONE`);
     } catch (e) {
-        return Promise.reject(e);
+        logger.error(`ERROR ON INIT AUTO POST BASIC INFO  : ${e}`);
     }
 };
 
@@ -71,8 +72,9 @@ let initScheduledTask = async () => {
                 scheduledRegisteredTask(task);
             });
         }
+        logger.info(`INIT SCHEDULED TASK DONE`);
     } catch (e) {
-        return Promise.reject(e);
+        logger.error(`ERROR ON INIT SCHEDULED TASK : ${e}`);
     }
 };
 
@@ -135,9 +137,22 @@ let findAndRemoveOldPost = async () => {
     if (publishPostInfos !== undefined && publishPostInfos.length !== 0) {
         publishPostInfos.forEach(async (publishPostInfo) => {
             let dateTime = publishPostInfo.creationDateTime.persianDateTime;
-            if (getCurrentDateTime() >= getNthHourAfter(dateTime, 36) || true) {
+            if (getCurrentDateTime() >= getNthHourAfter(dateTime, 36)) {
                 let post = await Post.loadById(publishPostInfo.post);
                 await removePost(post.user, post.identifier, Constant.REGISTERED_POST_STATUS, publishPostInfo.channel);
+            }
+        });
+    }
+};
+
+let findAndChangeStatusNotSoldPost = async () => {
+    let posts = await Post.searchNotSoldPost();
+    if (posts !== undefined && posts.length !== 0) {
+        posts.forEach(async (post) => {
+            let dateTime = post.creationDateTime.persianDateTime;
+            if (getCurrentDateTime() >= getNthHourAfter(dateTime, 24 * 15) || true) {
+                let status = getCategoryElement(Constant.NOT_SOLD_POST_STATUS);
+                await Post.updatePostStatus(post._id, status);
             }
         });
     }
@@ -154,6 +169,17 @@ let scheduleOldPostFinder = () => {
     });
 };
 
+let scheduleNotSoldForLongTimePostFinder = () => {
+    let startTime = `* 6 * * *`;
+    schedule.scheduleJob(startTime, function () {
+        findAndChangeStatusNotSoldPost().then(() => {
+            logger.info(`OLD NOT SOLD FINDER HAS BEAN RUN ON ${getCurrentDateTime()}`);
+        }).catch(e => {
+            logger.error(`ERROR ON EXECUTE NOT SOLD FINDER : ${e}`);
+        });
+    });
+};
+
 module.exports = {
-    initAutoPostBasicInfo, initScheduledTask, scheduledAutoPostBasicInfo, scheduledRegisteredTask, scheduleOldPostFinder
+    initAutoPostBasicInfo, initScheduledTask, scheduledAutoPostBasicInfo, scheduledRegisteredTask, scheduleOldPostFinder , scheduleNotSoldForLongTimePostFinder
 };

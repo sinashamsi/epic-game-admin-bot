@@ -3,7 +3,7 @@ const {getCurrentDateTimeJson,} = require('./../utils/utils');
 const {getCategoryElement, Constant} = require('./../service/categories-service');
 const {loadChannels} = require('./../service/channel-service');
 
-let importAccounts = async (file, user, account) => {
+let importAccounts = async (file, user, account, shouldRegister, onlyFavourite) => {
     try {
         let posts = [];
         let attributes = [];
@@ -20,7 +20,7 @@ let importAccounts = async (file, user, account) => {
                     post.done = false;
                     post = {};
                     post.startGame = false;
-                    post.hasGoodGame = false;
+                    post.favourite = false;
                     post.content = '';
                     post.originalContent = '';
                     post.lines = line + '\n';
@@ -113,6 +113,9 @@ let importAccounts = async (file, user, account) => {
                         || line.includes("Far Cry New Dawn")
                     ) {
                         post.hasGoodGame = true;
+                        post.favourite = true;
+                    } else {
+
                     }
                     post.content += line + "\n";
                 }
@@ -124,30 +127,28 @@ let importAccounts = async (file, user, account) => {
         let lastIdentifier = await Post.findNextIdentifier(user);
         let lastlines = "";
         await posts.forEach(async (item, index) => {
-            if (!item.hasGoodGame) {
+            if ((onlyFavourite && item.favourite) || (!onlyFavourite && !item.favourite)) {
                 lastlines += item.lines;
             }
 
+            if (shouldRegister) {
+                let channels = await loadChannels(user, [
+                    {"username": "-1001273017531"},
+                    {"username": "@egseller_shop"}
+                ]);
 
 
-            // let channels = await loadChannels(user, [
-            //     {"username" : "-1001273017531"},
-            //     {"username" : "@egseller_shop"}
-            // ]);
-            //
-            //
-            // item.creationDateTime = getCurrentDateTimeJson();
-            // item.lastUpdateDateTime = getCurrentDateTimeJson();
-            // item.user = user;
-            // item.account = account;
-            // item.identifier = lastIdentifier + index;
-            // item.status = status;
-            // item.channels = channels;
-            // item.favourite = false;
-            //
-            // let post = new Post(item);
-            // await post.save();
-            // console.log(item.identifier);
+                item.creationDateTime = getCurrentDateTimeJson();
+                item.lastUpdateDateTime = getCurrentDateTimeJson();
+                item.user = user;
+                item.account = account;
+                item.identifier = lastIdentifier + index;
+                item.status = status;
+                item.channels = channels;
+
+                let post = new Post(item);
+                await post.save();
+            }
         });
         return Promise.resolve(lastlines)
     } catch (e) {

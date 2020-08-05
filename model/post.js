@@ -194,6 +194,21 @@ PostSchema.statics.searchForAutoPost = function (favourite, numberOfPost) {
 };
 
 
+PostSchema.statics.searchNotSoldPost = function () {
+    let Post = this;
+    return Post.find(
+        {
+            "status.name": {$nin: [Constant.DELETED_POST_STATUS, Constant.SOLD_POST_STATUS]}
+        }
+    ).exec().then(searchResultArray => {
+        if (!searchResultArray) {
+            searchResultArray = [];
+        }
+        return Promise.resolve(searchResultArray);
+    }).catch(err => Promise.reject(err));
+};
+
+
 PostSchema.methods.updatePost = function (newInfo) {
     let post = this;
     return post.updateOne(newInfo);
