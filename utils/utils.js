@@ -21,6 +21,27 @@ let getCurrentDateTime = () => {
     return dateTime;
 };
 
+let getCurrentDateTimeJson = () => {
+    let dataTime = new persianDate().format('YYYY/MM/DD-HH:mm:ss');
+    return {
+        persianDateTime : dataTime ,
+        englishDateTime : convertPersianDateToGregorian(dataTime)
+    };
+};
+
+
+let getNthHourAfter = (dateTime, count) => {
+    let dateTimeSplited = dateTime.split("-");
+    let dateSplited = dateTimeSplited[0].split("/");
+    let timeSplited = dateTimeSplited[1].split(":");
+    const parts = [...dateSplited, ...timeSplited];
+    let result = parts.map(function (item) {
+        return parseInt(item, 10);
+    });
+    return new persianDate(result).add('hours', count).format('YYYY/MM/DD-HH:mm:ss');
+};
+
+
 let removeFromModel = (model, keys) => {
     let modelObject = model.toObject();
     let result = {};
@@ -106,5 +127,10 @@ convertPersianDateToGregorian = function(dataTime) {
 };
 
 module.exports = {
-    handleResponse, getCurrentDateTime, removeFromModel , convertPersianDateToGregorian
+    handleResponse,
+    getCurrentDateTime,
+    removeFromModel,
+    convertPersianDateToGregorian,
+    getCurrentDateTimeJson,
+    getNthHourAfter
 };

@@ -1,7 +1,31 @@
 const {mongoose} = require('./../db/mongoose');
-const {getCurrentDateTime} = require('./../utils/utils');
+const {getCurrentDateTimeJson} = require('./../utils/utils');
 
 let verificationSchema = new mongoose.Schema({
+    creationDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    },
+    lastUpdateDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    },
     mobileNumber: {
         type: String,
         required: true,
@@ -20,16 +44,6 @@ let verificationSchema = new mongoose.Schema({
         }
     },
     code: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    creationDateTime: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    lastUpdateDateTime: {
         type: String,
         required: true,
         trim: true
@@ -68,7 +82,7 @@ verificationSchema.statics.loadLastVerifiedVerification = function (mobileNumber
 verificationSchema.statics.verify = function (identifier, actionKey) {
     let verification = this;
     return verification.updateOne({_id: identifier}, {
-        lastUpdateDateTime: getCurrentDateTime(),
+        lastUpdateDateTime: getCurrentDateTimeJson(),
         verified: true,
         actionKey: actionKey
     });

@@ -1,26 +1,42 @@
 const {mongoose} = require('./../db/mongoose');
-const {removeFromModel, getCurrentDateTime} = require('./../utils/utils');
+const {removeFromModel, getCurrentDateTimeJson} = require('./../utils/utils');
 
 let publishPostHistorySchema = new mongoose.Schema({
+    creationDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    },
+    lastUpdateDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    },
     identifier: {
         type: String,
         required: true,
-        trim: true
-    },
-    creationDateTime: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    lastUpdateDateTime: {
-        type: String,
         trim: true
     },
     active: {
         type: Boolean,
         required: true
     },
-    post: {type: mongoose.Schema.ObjectId, ref: 'Post'}
+    post: {type: mongoose.Schema.ObjectId, ref: 'Post'} ,
+    channel: {type: mongoose.Schema.ObjectId, ref: 'TelegramChannel'}
 });
 
 publishPostHistorySchema.methods.toJSON = function () {
@@ -29,12 +45,12 @@ publishPostHistorySchema.methods.toJSON = function () {
 
 publishPostHistorySchema.statics.updateLastUpdateDateTime = function (identifier) {
     let PublishPostHistory = this;
-    return PublishPostHistory.updateOne({_id: identifier}, {lastUpdateDateTime: getCurrentDateTime()});
+    return PublishPostHistory.updateOne({_id: identifier}, {lastUpdateDateTime: getCurrentDateTimeJson()});
 };
 
 publishPostHistorySchema.statics.makeDeActivePublishPostHistory = function (identifier) {
     let PublishPostHistory = this;
-    return PublishPostHistory.updateOne({_id: identifier}, {lastUpdateDateTime: getCurrentDateTime(), active: false});
+    return PublishPostHistory.updateOne({_id: identifier}, {lastUpdateDateTime: getCurrentDateTimeJson(), active: false});
 };
 
 
@@ -42,15 +58,15 @@ publishPostHistorySchema.statics.loadById = function (id) {
     let publishPostHistory = this;
     return publishPostHistory.findOne({
         _id: id,
-    });
+    }).populate('channel');
 };
 
-publishPostHistorySchema.statics.findActivePost = function () {
+
+publishPostHistorySchema.statics.loadAllActivePostInfo = function () {
     let publishPostHistory = this;
-    return publishPostHistory.find({
-        active: true,
-    }).populate('post');
+    return publishPostHistory.find({active: true}).populate('channel');
 };
+
 
 
 let PublishPostHistory = mongoose.model('PublishPostHistory', publishPostHistorySchema);

@@ -2,14 +2,28 @@ const {mongoose} = require('./../db/mongoose');
 
 let autoPostBasicInfoSchema = new mongoose.Schema({
     creationDateTime: {
-        type: String,
-        required: true,
-        trim: true
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
     },
     lastUpdateDateTime: {
-        type: String,
-        required: true,
-        trim: true
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
     },
     interval: {
         type: Number,
@@ -31,7 +45,8 @@ let autoPostBasicInfoSchema = new mongoose.Schema({
         type: Boolean,
         required: true
     },
-    user: {type: mongoose.Schema.ObjectId, ref: 'User'}
+    user: {type: mongoose.Schema.ObjectId, ref: 'User'},
+    channel: {type: mongoose.Schema.ObjectId, ref: 'TelegramChannel'}
 });
 
 
@@ -42,12 +57,18 @@ autoPostBasicInfoSchema.methods.updateBasicInfo = function (newInfo) {
 
 autoPostBasicInfoSchema.statics.loadBasicInfo = function () {
     let autoPostBasicInfo = this;
-    return autoPostBasicInfo.find({}).populate('user');
+    return autoPostBasicInfo.find({}).populate('user channel');
 };
+
+autoPostBasicInfoSchema.statics.loadBasicInfoByChannel = function (channel) {
+    let autoPostBasicInfo = this;
+    return autoPostBasicInfo.findOne({channel});
+};
+
 
 autoPostBasicInfoSchema.statics.loadBasicInfoByUser = function (user) {
     let autoPostBasicInfo = this;
-    return autoPostBasicInfo.findOne({user});
+    return autoPostBasicInfo.find({user}).populate('channel');
 };
 
 

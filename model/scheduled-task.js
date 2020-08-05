@@ -1,19 +1,33 @@
 const {mongoose} = require('./../db/mongoose');
-const {getCurrentDateTime} = require('./../utils/utils');
+const {getCurrentDateTimeJson} = require('./../utils/utils');
 const {getCategoryElement, Constant} = require('./../service/categories-service');
 
 let scheduledTaskSchema = new mongoose.Schema({
-    executeDateTime: {
-        type: String,
-        required: true,
-        trim: true
-    },
     creationDateTime: {
-        type: String,
-        required: true,
-        trim: true
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
     },
     lastUpdateDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    },
+    executeDateTime: {
         type: String,
         required: true,
         trim: true
@@ -45,7 +59,7 @@ let scheduledTaskSchema = new mongoose.Schema({
 scheduledTaskSchema.statics.updateScheduledTaskStatus = function (id, statusCode) {
     let scheduledTask = this;
     let status = getCategoryElement(statusCode);
-    return scheduledTask.updateOne({_id: id}, {lastUpdateDateTime: getCurrentDateTime(), status: status});
+    return scheduledTask.updateOne({_id: id}, {lastUpdateDateTime: getCurrentDateTimeJson(), status: status});
 };
 
 

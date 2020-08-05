@@ -6,7 +6,8 @@ mongoose.connect(config.get('MONGO_URI'), {
     useNewUrlParser: true,
     useFindAndModify: false,
     useCreateIndex: true,
-    useUnifiedTopology: true
+    useUnifiedTopology: true,
+    retryWrites : false
 });
 module.exports = {
     mongoose

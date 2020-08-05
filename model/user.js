@@ -2,38 +2,57 @@ const _ = require('lodash');
 
 const {mongoose} = require('../db/mongoose');
 const {Account} = require('./account');
-const {getCurrentDateTime} = require('./../utils/utils');
+const {TelegramChannel} = require('./telegram-channel');
+const {getCurrentDateTimeJson} = require('./../utils/utils');
+const {getCategoryElement, Constant} = require('./../service/categories-service');
 
 
 let UserSchema = new mongoose.Schema({
-    name: {
-        type: String,
-        required: true,
-        minlength: 3,
-        trim: true
+    creationDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
     },
-    channelChatIdentifier: {
-        type: String,
-        required: true
+    lastUpdateDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
     },
-    adminChatIdentifier: {
-        type: String,
-        required: true
-    },
+    channels: [{type: mongoose.Schema.ObjectId, ref: 'TelegramChannel'}],
     defaultAttributes: [
         {
             type: String,
             trim: true
         }
     ],
-    accounts: [{type: mongoose.Schema.ObjectId, ref: 'Account'}]
+    accounts: [{type: mongoose.Schema.ObjectId, ref: 'Account'}] ,
+    status: {
+        name: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianName: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    }
 });
-
-UserSchema.methods.toJSON = function () {
-    let user = this;
-    let userObject = user.toObject();
-    return _.pick(userObject, ['name']);
-};
 
 
 UserSchema.methods.updateUserDefaultAttributes = async function (defaultAttributes) {
@@ -48,20 +67,28 @@ UserSchema.methods.updateUserDefaultAttributes = async function (defaultAttribut
 };
 
 
+UserSchema.methods.updateUserChannels = async function (newChannels) {
+    let user = this;
+    let channels = [];
+    try {
+        for (const newChannel of newChannels) {
+            let channel = await TelegramChannel.updateChannel(newChannel);
+            channels.push(channel);
+        }
+        user.channels = channels;
+        await user.save();
+        return Promise.resolve(channels);
+    } catch (e) {
+        return Promise.reject(e);
+    }
+};
+
+
 UserSchema.statics.findByAccount = function (account) {
     let User = this;
     return User.findOne({
         'accounts': mongoose.Types.ObjectId(account._id)
-    });
-};
-
-UserSchema.statics.updateTelegramInfo = function (identifier, channelChatIdentifier, adminChatIdentifier) {
-    let User = this;
-    return User.updateOne({_id: identifier}, {
-        lastUpdateDateTime: getCurrentDateTime(),
-        channelChatIdentifier: channelChatIdentifier,
-        adminChatIdentifier: adminChatIdentifier
-    });
+    }).populate('channels');
 };
 
 
@@ -69,14 +96,18 @@ UserSchema.statics.persist = async function (info) {
     let User = this;
     try {
         let accounts = await Account.persist(info.accounts);
-        const userInfo = _.pick(info, ['name', 'channelChatIdentifier', 'adminChatIdentifier']);
-        userInfo.accounts = accounts;
-
-        let user = new User(userInfo);
+        let channels = await TelegramChannel.persist(info.channels);
+        info.accounts = accounts;
+        info.channels = channels;
+        info.creationDateTime = getCurrentDateTimeJson();
+        info.lastUpdateDateTime = getCurrentDateTimeJson();
+        info.status = getCategoryElement(Constant.REGISTERED_USER_STATUS);
+        let user = new User(info);
         await user.save();
-        return Promise.resolve(user);
+        await TelegramChannel.updateChannelUser(info.channels, user);
+        return Promise.resolve(info);
     } catch (e) {
-        return Promise.resolve(e);
+        return Promise.reject(e);
     }
 };
 

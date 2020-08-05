@@ -1,22 +1,36 @@
 const {mongoose} = require('./../db/mongoose');
 
 let educationSchema = new mongoose.Schema({
+    creationDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    },
+    lastUpdateDateTime: {
+        englishDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        persianDateTime: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    },
     question: {
         type: String,
         required: true,
         trim: true
     },
     answer: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    creationDateTime: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    lastUpdateDateTime: {
         type: String,
         required: true,
         trim: true

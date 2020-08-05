@@ -1,4 +1,5 @@
 let Constant = Object.freeze({
+    REGISTERED_WITH_FILE_POST_STATUS: 'REGISTERED_WITH_FILE_POST_STATUS',
     REGISTERED_POST_STATUS: 'REGISTERED_POST_STATUS',
     SENT_POST_STATUS: 'SENT_POST_STATUS',
     DELETED_POST_STATUS: 'DELETED_POST_STATUS',
@@ -13,11 +14,14 @@ let Constant = Object.freeze({
     SMS_TEMPLATE_ID_FOR_LOGIN: 'SMS_TEMPLATE_ID_FOR_LOGIN',
 
     ADMIN_ROLE: 'ADMIN_ROLE',
-    USER_ROLE: 'USER_ROLE'
+    USER_ROLE: 'USER_ROLE',
 
+    REGISTERED_USER_STATUS: 'REGISTERED_USER_STATUS',
 
+    ACTIVE_CHANNEL_STATUS: 'ACTIVE_CHANNEL_STATUS',
+    DEACTIVATE_CHANNEL_STATUS: 'DEACTIVATE_CHANNEL_STATUS',
 
-
+    EMPTY_STRING: ''
 });
 
 const categories = [
@@ -40,6 +44,10 @@ const categories = [
             {
                 name: Constant.SOLD_POST_STATUS,
                 persianName: "فروخته شده"
+            },
+            {
+                name: Constant.REGISTERED_WITH_FILE_POST_STATUS,
+                persianName: "ثبت فایلی"
             }
         ]
     },
@@ -72,6 +80,30 @@ const categories = [
             {
                 name: Constant.LOGIN_VERIFICATION_ACTION_TYPE,
                 persianName: "عملیات تأیید جهت ورود"
+            }
+        ]
+    },
+    {
+        name: "USER_STATUS",
+        persianName: "وضعیت کاربر",
+        elements: [
+            {
+                name: Constant.REGISTERED_USER_STATUS,
+                persianName: "ثبت شده"
+            }
+        ]
+    },
+    {
+        name: "CHANNEL_STATUS",
+        persianName: "وضعیت کانال",
+        elements: [
+            {
+                name: Constant.ACTIVE_CHANNEL_STATUS,
+                persianName: "فعال"
+            },
+            {
+                name: Constant.DEACTIVATE_CHANNEL_STATUS,
+                persianName: "غیر فعال"
             }
         ]
     }

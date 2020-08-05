@@ -1,7 +1,7 @@
 {
   "Level": "development",
   "PORT": 8081,
-  "MONGO_URI": "mongodb://epicgame_bot:ss09302282702@localhost:27017/epicgame_bot",
+  "MONGO_URI": "mongodb://localhost:27017/epic-game?retryWrites=false",
   "JWT_SECRET": "epic-game",
   "TELEGRAM_BOT_TOKEN": "929340112:AAGq72Rsxrx6JY9U9pqxLqe7nuzviq-U9zw",
   "NTBA_FIX_319": 1,
